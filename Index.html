@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BETSI Online - Driver DB (AHT ↔ ISD)</title>
+  <style>
+    :root{--bg:#f6f7fb;--card:#fff;--accent:#0b69ff;--muted:#666;}
+    body{font-family:Inter, system-ui, Arial, sans-serif; margin:0; background:var(--bg); color:#111;}
+    header{background:linear-gradient(90deg,#0b69ff 0%, #6c8cff 100%); color:#fff; padding:18px 20px}
+    .wrap{max-width:980px;margin:18px auto;padding:0 16px}
+    .card{background:var(--card);border-radius:10px;padding:14px;margin-bottom:12px; box-shadow:0 2px 8px rgba(8,10,20,0.04)}
+    h1{margin:0;font-size:20px}
+    label{display:block;font-size:13px;margin-top:8px;color:var(--muted)}
+    input[type="text"], input[type="email"], select, textarea{width:100%;padding:8px;border-radius:8px;border:1px solid #e6e8f0;margin-top:6px;box-sizing:border-box}
+    .row{display:flex;gap:10px}
+    .row .col{flex:1}
+    button{background:var(--accent);color:#fff;padding:9px 12px;border:0;border-radius:8px;cursor:pointer}
+    button.ghost{background:#eef2ff;color:var(--accent);border:1px solid #d5e1ff}
+    .small{font-size:13px;color:var(--muted)}
+    .driver-item{padding:10px;border-radius:8px;border:1px dashed #eef2ff;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+    .driver-left{display:flex;gap:12px;align-items:center}
+    .pill{background:#eef2ff;color:var(--accent);padding:6px 8px;border-radius:999px;font-size:12px}
+    .actions{display:flex;gap:6px}
+    .danger{background:#ff4d4f}
+    .muted{color:#888;font-size:13px}
+    .status-ready{color:green;font-weight:600}
+    .status-turun{color:#d97706;font-weight:600}
+    .flex-between{display:flex;justify-content:space-between;align-items:center}
+    footer{padding:18px;text-align:center;color:#666;font-size:13px}
+    @media(min-width:900px){ .row{flex-wrap:nowrap} }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <h1>BETSI Online — Driver DB (AHT ↔ ISD)</h1>
+          <div class="small">Realtime Firestore • Upload CSV • Auto WhatsApp</div>
+        </div>
+        <div id="userPanel" style="text-align:right"></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- AUTH -->
+    <section id="authSection" class="card">
+      <div class="flex-between">
+        <div><strong>Login</strong> / Register</div>
+        <div class="small" id="roleNote">Role: -</div>
+      </div>
+
+      <div style="margin-top:8px">
+        <label>Email</label>
+        <input id="email" type="email" placeholder="email@domain.com" />
+        <label>Password</label>
+        <input id="password" type="password" placeholder="minimal 6 karakter" />
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button id="btnLogin">Login</button>
+          <button id="btnRegister" class="ghost">Register</button>
+          <button id="btnSignOut" class="ghost" style="margin-left:auto;display:none">Sign out</button>
+        </div>
+        <div id="authMsg" class="small muted" style="margin-top:8px"></div>
+      </div>
+    </section>
+
+    <!-- AHT Tools -->
+    <section id="ahtTools" style="display:none">
+      <div class="card">
+        <div class="flex-between">
+          <strong>Upload CSV driver</strong>
+          <div class="small">Format: <code>Nama,NoHP,StatusDriver,Lambung,Keterangan</code></div>
+        </div>
+        <div style="margin-top:10px" class="row">
+          <div class="col">
+            <input id="fileCsv" type="file" accept=".csv" />
+          </div>
+          <div style="width:170px">
+            <button id="btnUploadCsv">Upload CSV</button>
+          </div>
+        </div>
+        <div class="small muted" id="csvMsg" style="margin-top:8px"></div>
+      </div>
+
+      <div class="card">
+        <strong>Tambah driver manual</strong>
+        <div class="row" style="margin-top:10px">
+          <div class="col">
+            <label>Nama (wajib)</label>
+            <input id="m_name" type="text" />
+          </div>
+          <div class="col">
+            <label>No HP (wajib)</label>
+            <input id="m_phone" type="text" placeholder="08xxxxxxxx" />
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:8px">
+          <div class="col">
+            <label>Lambung</label>
+            <input id="m_lambung" type="text" />
+          </div>
+          <div class="col">
+            <label>Status driver</label>
+            <select id="m_status">
+              <option value="KOPERASI">KOPERASI</option>
+              <option value="NON_KOPERASI">NON_KOPERASI</option>
+            </select>
+          </div>
+        </div>
+
+        <label>Keterangan</label>
+        <input id="m_ket" type="text" />
+
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button id="btnAddDriver">Tambah driver</button>
+          <button id="btnClear" class="ghost">Clear</button>
+        </div>
+        <div id="manualMsg" class="small muted" style="margin-top:8px"></div>
+      </div>
+    </section>
+
+    <!-- Driver DB & Search -->
+    <section class="card">
+      <div class="flex-between">
+        <strong>Driver Database</strong>
+        <div>
+          <input id="search" type="text" placeholder="Cari nama / no hp / lambung" style="padding:8px;border-radius:8px;border:1px solid #e6e8f0" />
+        </div>
+      </div>
+
+      <div id="listDrivers" style="margin-top:12px"></div>
+      <div id="listMsg" class="small muted" style="margin-top:8px"></div>
+    </section>
+
+    <!-- Prep / Confirm (ISD) -->
+    <section id="prepSection" class="card" style="display:none">
+      <div class="flex-between">
+        <strong>Konfirmasi / Update Status (ISD)</strong>
+        <div class="small">Pilih driver lalu set status</div>
+      </div>
+
+      <div id="selectedDriver" style="margin-top:10px" class="small muted">Belum ada driver dipilih.</div>
+
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <button id="setReady" class="ghost">READY</button>
+        <button id="setCancel" class="ghost">CANCEL</button>
+        <button id="setNoResp" class="ghost">NO RESPONSE</button>
+        <button id="setTurun" class="ghost">TURUN (beri alasan)</button>
+      </div>
+
+      <div id="turunBox" style="display:none;margin-top:10px">
+        <label>Alasan TURUN</label>
+        <select id="turunReason">
+          <option value="Sakit">Sakit</option>
+          <option value="Capek">Capek</option>
+          <option value="Armada trouble">Armada trouble</option>
+          <option value="Antar anak">Antar anak</option>
+          <option value="Ada urusan keluarga">Ada urusan keluarga</option>
+          <option value="Lainnya">Lainnya (isi keterangan)</option>
+        </select>
+        <input id="turunKeterangan" type="text" placeholder="Keterangan (opsional)" style="margin-top:8px" />
+        <div style="margin-top:8px">
+          <button id="confirmTurun">Kirim TURUN</button>
+        </div>
+      </div>
+
+      <div id="prepMsg" class="small muted" style="margin-top:8px"></div>
+    </section>
+
+    <footer class="card">
+      <div class="small muted">Versi demo • Simpel & siap dikembangkan. Butuh tambahan fitur export / login AD? Kiki bantu.</div>
+    </footer>
+  </main>
+
+  <!-- Firebase v9 modular SDK -->
+  <script type="module">
+    // ---------------------------
+    // Firebase SDK imports
+    // ---------------------------
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+    import { getAnalytics } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-analytics.js";
+    import {
+      getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword,
+      onAuthStateChanged, signOut
+    } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
+    import {
+      getFirestore, collection, doc, setDoc, addDoc, getDoc, getDocs,
+      query, where, onSnapshot, orderBy, updateDoc, serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+
+    // ---------------------------
+    // YOUR FIREBASE CONFIG (replace if perlu)
+    // ---------------------------
+    const firebaseConfig = {
+      apiKey: "AIzaSyDLXvZkGT30e7oVrGSKBYcyPDfVT7m-yDE",
+      authDomain: "driver-monitoring-e5fef.firebaseapp.com",
+      projectId: "driver-monitoring-e5fef",
+      storageBucket: "driver-monitoring-e5fef.firebasestorage.app",
+      messagingSenderId: "87626205930",
+      appId: "1:87626205930:web:45764c419a57c61eae6593",
+      measurementId: "G-PEW41XVEB1"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    try { getAnalytics(app); } catch(e){ /* analytics may fail on local */ }
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // ---------------------------
+    // UI references
+    // ---------------------------
+    const emailEl = document.getElementById('email');
+    const passEl = document.getElementById('password');
+    const btnLogin = document.getElementById('btnLogin');
+    const btnRegister = document.getElementById('btnRegister');
+    const btnSignOut = document.getElementById('btnSignOut');
+    const authMsg = document.getElementById('authMsg');
+    const userPanel = document.getElementById('userPanel');
+    const roleNote = document.getElementById('roleNote');
+
+    const ahtTools = document.getElementById('ahtTools');
+    const prepSection = document.getElementById('prepSection');
+
+    const fileCsv = document.getElementById('fileCsv');
+    const btnUploadCsv = document.getElementById('btnUploadCsv');
+    const csvMsg = document.getElementById('csvMsg');
+
+    const m_name = document.getElementById('m_name');
+    const m_phone = document.getElementById('m_phone');
+    const m_lambung = document.getElementById('m_lambung');
+    const m_status = document.getElementById('m_status');
+    const m_ket = document.getElementById('m_ket');
+    const btnAddDriver = document.getElementById('btnAddDriver');
+    const manualMsg = document.getElementById('manualMsg');
+    const btnClear = document.getElementById('btnClear');
+
+    const search = document.getElementById('search');
+    const listDrivers = document.getElementById('listDrivers');
+    const listMsg = document.getElementById('listMsg');
+
+    const setReady = document.getElementById('setReady');
+    const setCancel = document.getElementById('setCancel');
+    const setNoResp = document.getElementById('setNoResp');
+    const setTurun = document.getElementById('setTurun');
+    const turunBox = document.getElementById('turunBox');
+    const turunReason = document.getElementById('turunReason');
+    const turunKeterangan = document.getElementById('turunKeterangan');
+    const confirmTurun = document.getElementById('confirmTurun');
+    const selectedDriverEl = document.getElementById('selectedDriver');
+    const prepMsg = document.getElementById('prepMsg');
+
+    let currentUser = null;
+    let currentUserRole = 'TEMP';
+    let selectedDriver = null;
+    let unsubscribeDrivers = null;
+
+    // ---------------------------
+    // Auth events
+    // ---------------------------
+    btnLogin.addEventListener('click', async () => {
+      authMsg.textContent = '';
+      const email = emailEl.value.trim();
+      const pass = passEl.value;
+      if(!email || !pass){ authMsg.textContent = 'Isi email dan password.'; return; }
+      try{
+        await signInWithEmailAndPassword(auth, email, pass);
+        authMsg.textContent = 'Login berhasil.';
+      }catch(e){ authMsg.textContent = 'Login error: '+e.message; }
+    });
+
+    btnRegister.addEventListener('click', async () => {
+      authMsg.textContent = '';
+      const email = emailEl.value.trim();
+      const pass = passEl.value;
+      if(!email || !pass){ authMsg.textContent = 'Isi email dan password.'; return; }
+      try{
+        const credential = await createUserWithEmailAndPassword(auth, email, pass);
+        // create user doc with role TEMP by default
+        await setDoc(doc(db, 'users', credential.user.uid), {
+          email: email,
+          role: 'TEMP',
+          createdAt: serverTimestamp()
+        });
+        authMsg.textContent = 'Register sukses. Role TEMP diset. Hubungi admin untuk ubah role.';
+      }catch(e){ authMsg.textContent = 'Register error: '+e.message; }
+    });
+
+    btnSignOut.addEventListener('click', async () => {
+      await signOut(auth);
+    });
+
+    onAuthStateChanged(auth, async user => {
+      currentUser = user;
+      if(user){
+        btnSignOut.style.display = 'inline-block';
+        userPanel.innerHTML = `<div class="small">Signed in as <strong>${user.email}</strong></div>`;
+        // load role
+        const docu = await getDoc(doc(db, 'users', user.uid));
+        if(docu.exists()){
+          currentUserRole = docu.data().role || 'TEMP';
+        }else{
+          // create default
+          currentUserRole = 'TEMP';
+          await setDoc(doc(db, 'users', user.uid), { email: user.email, role: 'TEMP', createdAt: serverTimestamp() });
+        }
+        roleNote.textContent = 'Role: ' + currentUserRole;
+        authMsg.textContent = '';
+        toggleUIByRole();
+        startRealtimeDrivers(); // subscribe
+      }else{
+        currentUserRole = 'TEMP';
+        roleNote.textContent = 'Role: -';
+        userPanel.innerHTML = `<div class="small">Not signed</div>`;
+        btnSignOut.style.display = 'none';
+        toggleUIByRole();
+        if(unsubscribeDrivers) unsubscribeDrivers();
+        listDrivers.innerHTML = '';
+      }
+    });
+
+    // ---------------------------
+    // UI logic per role
+    // ---------------------------
+    function toggleUIByRole(){
+      // AHT can upload and add; ISD can confirm; ADMIN/MANAGER sees both
+      const isAHT = currentUserRole === 'AHT' || currentUserRole === 'ADMIN' || currentUserRole === 'MANAGER';
+      const isISD = currentUserRole === 'ISD' || currentUserRole === 'ADMIN' || currentUserRole === 'MANAGER';
+      ahtTools.style.display = isAHT ? 'block' : 'none';
+      prepSection.style.display = isISD ? 'block' : 'none';
+      // if no login, show hint
+      if(!currentUser){
+        document.getElementById('authSection').classList.remove('card');
+      }
+    }
+
+    // ---------------------------
+    // CSV Upload
+    // ---------------------------
+    btnUploadCsv.addEventListener('click', async () => {
+      const file = fileCsv.files[0];
+      if(!file){ csvMsg.textContent = 'Pilih file CSV terlebih dahulu.'; return; }
+      csvMsg.textContent = 'Memproses...';
+      try{
+        const text = await file.text();
+        const rows = csvToArray(text);
+        let added=0, updated=0;
+        for(const r of rows){
+          // Normalize keys (lowercase)
+          const name = r['nama'] || r['name'] || r['Nama'] || r['Name'];
+          const phone = r['nohp'] || r['no_hp'] || r['no hp'] || r['phone'] || r['Phone'];
+          if(!name || !phone) continue;
+          const status = r['statusdriver'] || r['status_driver'] || r['status'] || 'KOPERASI';
+          const lambung = r['lambung'] || '';
+          const ket = r['keterangan'] || r['ket'] || '';
+
+          // Use phone as doc id (remove non-digit)
+          const id = 'drv_' + phone.replace(/\D/g,'');
+          const ref = doc(db,'drivers', id);
+          const snap = await getDoc(ref);
+          const data = { name, phone, status, lambung, keterangan: ket, updatedAt: serverTimestamp() };
+          if(snap.exists()){ await setDoc(ref, {...snap.data(), ...data}); updated++; } else { await setDoc(ref, data); added++; }
+        }
+        csvMsg.textContent = `Selesai. Ditambahkan: ${added}, Diupdate: ${updated}`;
+      }catch(e){ csvMsg.textContent = 'Error: '+e.message; }
+    });
+
+    function csvToArray(str, delimiter = ','){
+      const lines = str.split(/\r?\n/).filter(Boolean);
+      if(lines.length === 0) return [];
+      const headers = lines[0].split(delimiter).map(h=>h.trim().toLowerCase());
+      const arr = [];
+      for(let i=1;i<lines.length;i++){
+        const row = lines[i].split(delimiter);
+        const obj = {};
+        for(let j=0;j<headers.length;j++){
+          obj[headers[j]] = (row[j]||'').trim();
+        }
+        // skip empty
+        if(Object.values(obj).every(v=>v==='')) continue;
+        arr.push(obj);
+      }
+      return arr;
+    }
+
+    // ---------------------------
+    // Manual add driver
+    // ---------------------------
+    btnAddDriver.addEventListener('click', async () => {
+      manualMsg.textContent = '';
+      const name = m_name.value.trim();
+      const phone = m_phone.value.trim();
+      if(!name || !phone){ manualMsg.textContent = 'Nama dan No HP wajib.'; return; }
+      const id = 'drv_' + phone.replace(/\D/g,'');
+      const data = {
+        name, phone,
+        lambung: m_lambung.value.trim() || '',
+        status: m_status.value,
+        keterangan: m_ket.value.trim() || '',
+        createdBy: currentUser ? currentUser.uid : 'anon',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+      try{
+        await setDoc(doc(db,'drivers',id), data);
+        manualMsg.textContent = 'Driver ditambahkan.';
+        m_name.value = m_phone.value = m_lambung.value = m_ket.value = '';
+      }catch(e){ manualMsg.textContent = 'Error: '+e.message; }
+    });
+
+    btnClear.addEventListener('click', ()=>{ m_name.value=''; m_phone.value=''; m_lambung.value=''; m_ket.value=''; manualMsg.textContent=''; });
+
+    // ---------------------------
+    // Realtime list & search
+    // ---------------------------
+    function startRealtimeDrivers(){
+      if(unsubscribeDrivers) unsubscribeDrivers();
+      const colRef = collection(db, 'drivers');
+      // orderBy fail if no field — we'll just listen to all
+      unsubscribeDrivers = onSnapshot(colRef, (snapshot) => {
+        const drivers = [];
+        snapshot.forEach(docSnap => drivers.push({ id: docSnap.id, ...docSnap.data() }));
+        renderDrivers(drivers);
+      }, (err) => {
+        listMsg.textContent = 'Listener error: ' + err.message;
+      });
+    }
+
+    function renderDrivers(drivers){
+      const q = search.value.trim().toLowerCase();
+      const filtered = drivers.filter(d => {
+        if(!q) return true;
+        return (d.name && d.name.toLowerCase().includes(q)) ||
+               (d.phone && d.phone.toLowerCase().includes(q)) ||
+               (d.lambung && d.lambung.toLowerCase().includes(q));
+      }).sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+      listDrivers.innerHTML = '';
+      if(filtered.length===0){ listDrivers.innerHTML = '<div class="muted">Belum ada driver cocok.</div>'; return; }
+      for(const d of filtered){
+        const div = document.createElement('div');
+        div.className = 'driver-item';
+        div.innerHTML = `
+          <div class="driver-left">
+            <div style="min-width:10px" class="pill">${d.lambung || '-'}</div>
+            <div>
+              <div><strong>${escapeHtml(d.name || '-')}</strong> <span class="muted">(${escapeHtml(d.status||'')})</span></div>
+              <div class="small muted">${escapeHtml(d.keterangan||'')}</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="small muted">${escapeHtml(d.phone||'')}</div>
+            <div class="actions">
+              <button class="ghost" data-wa="${d.phone}" title="WA">WA</button>
+              <button class="ghost" data-id="${d.id}" title="Pilih">Pilih</button>
+            </div>
+          </div>
+        `;
+        listDrivers.appendChild(div);
+        // WA
+        div.querySelector('[data-wa]').addEventListener('click', (e)=>{
+          const phone = e.currentTarget.getAttribute('data-wa') || '';
+          if(!phone){ alert('Tidak ada nomor HP'); return; }
+          const clean = phone.replace(/\D/g,'');
+          const text = encodeURIComponent(`Halo ${d.name || ''}, ini dari AHT/ISD. Mohon konfirmasi kesiapan Anda untuk shift hari ini.`);
+          window.open(`https://wa.me/62${clean.replace(/^0/,'') }?text=${text}`, '_blank');
+        });
+        // Pilih driver -> set selectedDriver
+        div.querySelector('[data-id]').addEventListener('click', (e)=>{
+          selectedDriver = d;
+          selectedDriverEl.innerHTML = `<strong>${escapeHtml(d.name)}</strong> — ${escapeHtml(d.phone)} — ${escapeHtml(d.lambung||'-')}`;
+          prepMsg.textContent = '';
+        });
+      }
+    }
+
+    search.addEventListener('input', () => { /* re-render triggered by realtime listener */ });
+
+    // ---------------------------
+    // ISD actions (set status)
+    // ---------------------------
+    setReady.addEventListener('click', ()=> setStatusAction('READY'));
+    setCancel.addEventListener('click', ()=> setStatusAction('CANCEL'));
+    setNoResp.addEventListener('click', ()=> setStatusAction('NO_RESPONSE'));
+    setTurun.addEventListener('click', ()=> { turunBox.style.display='block'; });
+
+    confirmTurun.addEventListener('click', ()=> {
+      const reason = turunReason.value;
+      let extra = turunKeterangan.value.trim();
+      let finalReason = reason + (extra ? `: ${extra}` : '');
+      setStatusAction('TURUN', finalReason);
+      turunBox.style.display='none';
+      turunKeterangan.value='';
+    });
+
+    async function setStatusAction(status, reason=''){
+      if(!selectedDriver){ prepMsg.textContent = 'Pilih driver terlebih dahulu.'; return; }
+      if(!currentUser){ prepMsg.textContent = 'Login required.'; return; }
+      const docId = `prep_${selectedDriver.id}_${Date.now()}`;
+      const data = {
+        driverId: selectedDriver.id,
+        driverName: selectedDriver.name || '',
+        driverPhone: selectedDriver.phone || '',
+        status: status,
+        reason: reason || '',
+        updatedBy: currentUser.uid,
+        updatedAt: serverTimestamp()
+      };
+      try{
+        await setDoc(doc(db,'prep',docId), data);
+        prepMsg.textContent = `Status ${status} tercatat.`;
+        // optional: set latest status in drivers doc
+        await updateDoc(doc(db,'drivers', selectedDriver.id), { latestStatus: status, latestReason: reason, updatedAt: serverTimestamp() });
+      }catch(e){
+        prepMsg.textContent = 'Error: '+e.message;
+      }
+    }
+
+    // ---------------------------
+    // Util
+    // ---------------------------
+    function escapeHtml(s){
+      if(!s) return '';
+      return s.replace(/[&<>"'`]/g, (m)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;'})[m]);
+    }
+  </script>
+</body>
+</html>
