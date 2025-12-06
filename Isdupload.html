@@ -1,0 +1,698 @@
+<!-- index.html — PART 1 of 3 -->
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>BETSI Online — FINAL (Part 1)</title>
+
+  <!-- Firebase compat -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+  <!-- SheetJS (only if you want client-side Excel parsing later; part2 will use it) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root{--bg:#f6f8fb;--card:#fff;--accent:#1967d2}
+    body{font-family:Inter,system-ui,Arial, Helvetica, sans-serif;margin:0;background:var(--bg);color:#111}
+    header{background:linear-gradient(90deg,#2f7bff,#6bb1ff);color:#fff;padding:16px}
+    .wrap{max-width:1040px;margin:18px auto;padding:14px}
+    .card{background:var(--card);border-radius:10px;padding:14px;margin-bottom:14px;box-shadow:0 8px 20px rgba(20,30,60,0.06)}
+    input,select,textarea,button{font-size:14px}
+    input,select,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #e6eef8;margin-top:8px;box-sizing:border-box}
+    button{padding:9px 12px;border-radius:8px;border:0;background:var(--accent);color:#fff;cursor:pointer}
+    button.ghost{background:#eef3ff;color:var(--accent);border:1px solid #dceaff}
+    .row{display:flex;gap:10px}
+    .row .col{flex:1}
+    .small{font-size:13px;color:#666}
+    .muted{color:#888;font-size:13px}
+    .list-item{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:8px;border:1px solid #eef2ff;margin-bottom:8px;background:#fff}
+    .meta{font-size:13px;color:#444}
+    .danger{background:#ff4d4f;color:#fff;border:0;padding:8px;border-radius:6px}
+    pre{white-space:pre-wrap;word-break:break-word}
+    @media(max-width:860px){.row{flex-direction:column}}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap" style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <h2 style="margin:0">BETSI Online — FINAL</h2>
+        <div class="small">AHT ● ISD ● MANAGER — Spreadsheet sync via Webhook</div>
+      </div>
+      <div id="userPanel" style="text-align:right" class="small"></div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- LOGIN -->
+    <section id="loginCard" class="card">
+      <strong>Login (akun lokal)</strong>
+      <div class="row" style="margin-top:8px">
+        <div class="col">
+          <label>Username</label>
+          <input id="username" placeholder="aht / isd / manager">
+        </div>
+        <div style="width:220px">
+          <label>Password</label>
+          <input id="password" type="password" placeholder="password">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div class="col"><button id="btnLogin">Login</button></div>
+        <div style="width:200px"><button id="btnDemo" class="ghost">Isi demo akun</button></div>
+      </div>
+      <div id="loginMsg" class="muted" style="margin-top:8px"></div>
+    </section>
+
+    <!-- APP area placeholder -->
+    <section id="appArea" style="display:none">
+      <div class="card" style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div class="small">Signed in as</div>
+          <div id="roleLabel" style="font-weight:700">-</div>
+        </div>
+        <div style="text-align:right">
+          <div id="currentShiftDisplay" class="small muted"></div>
+          <div style="margin-top:6px"><button id="btnLogout" class="ghost">Logout</button></div>
+        </div>
+      </div>
+
+      <!-- Placeholders for panels (AHT / ISD / MANAGER) - actual content continued in Part 2 & 3 -->
+      <div id="panelsPlaceholder"></div>
+    </section>
+
+  </main>
+
+  <script>
+  /************************************************************************
+   * PART 1 JS: init, constants, helpers, pushToGoogleSheet()
+   * (Part 2 will contain AHT UI & import logic, Part 3 will contain ISD/Manager)
+   ************************************************************************/
+
+  // ================ FIREBASE CONFIG - GANTI SEBELUM DIPAKAI ================
+  const firebaseConfig = {
+    apiKey: "PASTE_APIKEY",
+    authDomain: "PASTE_AUTHDOMAIN",
+    projectId: "PASTE_PROJECTID",
+  };
+  // ========================================================================
+
+  // initialize firebase (compat)
+  if(!firebaseConfig || !firebaseConfig.projectId){
+    console.warn('firebaseConfig belum diisi. Ganti config sebelum deploy.');
+  } else {
+    firebase.initializeApp(firebaseConfig);
+  }
+  const db = firebase.firestore();
+
+  // ================ WEBHOOK & TOKEN (dari Apps Script) =====================
+  const SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbx_B6MsBNRuyDrZYokgiQJg2bPY3CfzCXHBY0HdthPt6U4cNC3iCWHNMnn_p_TuzUblDw/exec";
+  const SHEET_SECRET_TOKEN = "BETSI2025";
+  // ========================================================================
+
+  // ================ LOCAL ACCOUNTS (Lokal) ================================
+  const ACCOUNTS = { aht:"aht123", isd:"isd123", manager:"mgr123" };
+  let CURRENT = { user:null, role:null }; // roles: AHT, ISD, MANAGER
+
+  // ================ UI refs ================================================
+  const loginCard = document.getElementById('loginCard');
+  const appArea = document.getElementById('appArea');
+  const roleLabel = document.getElementById('roleLabel');
+  const userPanel = document.getElementById('userPanel');
+  const loginMsg = document.getElementById('loginMsg');
+  const panelsPlaceholder = document.getElementById('panelsPlaceholder');
+
+  // demo buttons
+  document.getElementById('btnDemo').addEventListener('click', ()=> {
+    document.getElementById('username').value='aht';
+    document.getElementById('password').value='aht123';
+    login();
+  });
+  document.getElementById('btnLogin').addEventListener('click', login);
+  document.getElementById('btnLogout').addEventListener('click', ()=> location.reload());
+
+  function login(){
+    const u = (document.getElementById('username').value||'').trim().toLowerCase();
+    const p = (document.getElementById('password').value||'').trim();
+    if(!u||!p){ loginMsg.innerText = 'Isi username & password.'; return; }
+    if(ACCOUNTS[u] && ACCOUNTS[u] === p){
+      CURRENT.user = u;
+      CURRENT.role = (u === 'manager') ? 'MANAGER' : (u === 'aht' ? 'AHT' : 'ISD');
+      loginCard.style.display = 'none';
+      appArea.style.display = 'block';
+      roleLabel.innerText = CURRENT.role;
+      userPanel.innerHTML = `<div class="small">User: <b>${CURRENT.user}</b></div>`;
+      // load panels (actual panel HTML/script will be in Part 2 & 3)
+      loadPanelsPlaceholder();
+      // start realtime in Part 3 listener; but we'll set up stub here
+      startRealtimeStub();
+    } else {
+      loginMsg.innerText = 'Username atau password salah.';
+    }
+  }
+
+  function loadPanelsPlaceholder(){
+    // Minimal placeholders; real UIs will be rendered by Part 2/3 scripts
+    panelsPlaceholder.innerHTML = `
+      <div id="panelAht" class="card" style="display:none"><div class="muted">AHT panel will load (see part 2)</div></div>
+      <div id="panelIsd" class="card" style="display:none"><div class="muted">ISD panel will load (see part 3)</div></div>
+      <div id="panelManager" class="card" style="display:none"><div class="muted">Manager panel will load (see part 3)</div></div>
+    `;
+    // show according to role
+    document.getElementById('panelAht').style.display = (CURRENT.role==='AHT')?'block':'none';
+    document.getElementById('panelIsd').style.display = (CURRENT.role==='ISD')?'block':'none';
+    document.getElementById('panelManager').style.display = (CURRENT.role==='MANAGER')?'block':'none';
+  }
+
+  // stub for realtime start (real listener in part3)
+  function startRealtimeStub(){
+    console.log('Realtime listener to be initialized in Part 3.');
+  }
+
+  // ================ HELPERS ===============================================
+  function normalizePhone(phone){
+    if(!phone) return '';
+    let n = String(phone).replace(/\D/g,'');
+    if(n.startsWith('0')) n = '62' + n.slice(1);
+    if(n.startsWith('8')) n = '62' + n;
+    return n;
+  }
+  function escapeHtml(s){ if(s==null) return ''; return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c])); }
+
+  // ================ PUSH TO GOOGLE SHEET (Webhook) ========================
+  // driverData: { name, phone, phone_e164, lambung, status_driver, note, source, shift_date, shift_type, addedBy }
+  async function pushToGoogleSheet(driverData){
+    try{
+      if(!SHEET_WEBHOOK_URL || !SHEET_SECRET_TOKEN){
+        console.warn('Webhook URL / token belum diset');
+        return { ok:false, msg:'no webhook' };
+      }
+
+      // ensure phone_e164
+      if(!driverData.phone_e164) driverData.phone_e164 = normalizePhone(driverData.phone || '');
+
+      const payload = {
+        token: SHEET_SECRET_TOKEN,
+        action: 'add_driver',
+        nama: driverData.name || '',
+        hp: driverData.phone || '',
+        lambung: driverData.lambung || '',
+        status: driverData.status_driver || '',
+        keterangan: driverData.note || '',
+        shift: driverData.shift_type || '',
+        tanggal: driverData.shift_date || '',
+        addedBy: driverData.addedBy || ''
+      };
+
+      const resp = await fetch(SHEET_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const txt = await resp.text();
+      try { 
+        const j = JSON.parse(txt);
+        return j;
+      } catch(e){
+        // non-json response fallback
+        return { ok:true, raw: txt };
+      }
+    } catch(err){
+      console.error('pushToGoogleSheet error', err);
+      return { ok:false, msg: err.message };
+    }
+  }
+  // ========================================================================
+
+  // Expose pushToGoogleSheet for Part2/3 usage
+  window.pushToGoogleSheet = pushToGoogleSheet;
+  window.normalizePhone = normalizePhone;
+  window.escapeHtml = escapeHtml;
+  window.CURRENT = CURRENT;
+  window.db = db;
+
+  </script>
+</body>
+</html>
+<!-- index.html — PART 2 of 3 (AHT UI, import, master DB, checklist -> dailyInput) -->
+<script>
+/************************************************************************
+ * PART 2: AHT UI & Logic
+ ************************************************************************/
+
+// Create AHT panel HTML and wire events
+function renderAHTPanel() {
+  const html = `
+    <div id="ahtPanel" class="card">
+      <h3>AHT — Setup Shift & Master DB</h3>
+
+      <div class="row">
+        <div class="col">
+          <label>Tanggal Shift</label>
+          <input id="shiftDate" type="date"/>
+        </div>
+        <div style="width:220px">
+          <label>Jenis Shift</label>
+          <select id="shiftType"><option value="Mitra Pagi">Mitra Pagi</option><option value="Mitra Malam">Mitra Malam</option></select>
+        </div>
+      </div>
+
+      <div class="muted small" style="margin-top:8px">
+        Import spreadsheet MASTER hanya diizinkan sekali. Setelah dibuat, master akan dikunci (source=spreadsheet).
+        Untuk penambahan berikutnya, gunakan "Tambah Manual".
+      </div>
+
+      <div style="margin-top:12px" class="row">
+        <div class="col">
+          <label>Import MASTER (CSV / XLSX / XLS) — hanya 1x</label>
+          <input id="masterFile" type="file" accept=".csv,.xlsx,.xls" />
+        </div>
+        <div style="width:160px">
+          <label>&nbsp;</label>
+          <button id="btnImportMaster">Import Master</button>
+          <button id="btnClearMasterFile" class="ghost">Bersihkan</button>
+        </div>
+      </div>
+
+      <hr style="margin:12px 0">
+
+      <h4>Tambah driver manual (akan masuk MASTER & Google Sheet)</h4>
+      <div class="row">
+        <div class="col">
+          <label>Nama</label>
+          <input id="manual_name" placeholder="Nama driver"/>
+        </div>
+        <div style="width:160px">
+          <label>No HP</label>
+          <input id="manual_phone" placeholder="0812..."/>
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <div class="col"><label>Lambung</label><input id="manual_lambung" placeholder="S01"/></div>
+        <div style="width:200px"><label>Status Dasar</label>
+          <select id="manual_status"><option>Batangan</option><option>Tembak</option><option>Koperasi</option></select>
+        </div>
+      </div>
+      <label style="margin-top:8px">Keterangan</label>
+      <input id="manual_note" placeholder="opsional" />
+      <div class="row" style="margin-top:10px">
+        <div class="col"><button id="btnAddManual">Tambah ke MASTER</button></div>
+        <div style="width:220px"><button id="btnShowMaster" class="ghost">Tampilkan Master List</button></div>
+      </div>
+
+      <hr style="margin:14px 0">
+
+      <h4>Master Driver List</h4>
+      <div class="muted small">Centang driver yang akan dimasukkan ke READY (dailyInput) untuk tanggal & shift terpilih.</div>
+      <div style="margin-top:8px" class="row">
+        <div class="col">
+          <input id="masterSearch" placeholder="Cari nama / hp / lambung" />
+        </div>
+        <div style="width:220px">
+          <button id="btnSelectAll" class="ghost">Pilih Semua</button>
+          <button id="btnClearSelection" class="ghost">Bersihkan</button>
+        </div>
+      </div>
+      <div id="masterList" style="margin-top:10px;max-height:320px;overflow:auto;border-radius:8px;padding:6px;background:#fbfdff"></div>
+
+      <div style="margin-top:10px" class="row">
+        <div class="col"><button id="btnAddToReady">Tambah ke READY (dailyInput)</button></div>
+        <div style="width:220px"><button id="btnOpenReady" class="ghost">Lihat Ready List</button></div>
+      </div>
+
+      <div id="ahtStatus" class="muted" style="margin-top:8px"></div>
+    </div>
+  `;
+  document.getElementById('panelAht').innerHTML = html;
+  // default date to today
+  if(!document.getElementById('shiftDate').value) document.getElementById('shiftDate').value = new Date().toISOString().slice(0,10);
+
+  // wire events
+  document.getElementById('btnImportMaster').addEventListener('click', importMasterHandler);
+  document.getElementById('btnClearMasterFile').addEventListener('click', ()=> masterFile.value='');
+  document.getElementById('btnAddManual').addEventListener('click', addManualHandler);
+  document.getElementById('btnShowMaster').addEventListener('click', loadMasterList);
+  document.getElementById('masterSearch').addEventListener('input', loadMasterList);
+  document.getElementById('btnSelectAll').addEventListener('click', selectAllMaster);
+  document.getElementById('btnClearSelection').addEventListener('click', clearSelectionMaster);
+  document.getElementById('btnAddToReady').addEventListener('click', addSelectedToDailyInput);
+  document.getElementById('btnOpenReady').addEventListener('click', renderReadyListUI);
+
+  // initial load
+  loadMasterList();
+}
+
+/* --------------------------- MASTER IMPORT (ONLY ONCE) --------------------------- */
+// Check if master already exists (has any doc with source==='spreadsheet')
+async function masterHasSpreadsheetSource(){
+  const q = await db.collection('masterDrivers').where('source','==','spreadsheet').limit(1).get();
+  return !q.empty;
+}
+
+// Handler for import master file
+async function importMasterHandler(){
+  if(CURRENT.role !== 'AHT'){ alert('Hanya AHT boleh import master'); return; }
+  const f = document.getElementById('masterFile').files[0];
+  if(!f){ alert('Pilih file master (CSV/XLSX) terlebih dahulu'); return; }
+  // check existing spreadsheet source
+  const exists = await masterHasSpreadsheetSource();
+  if(exists){
+    alert('Master database sudah dibuat dari spreadsheet sebelumnya. Import lagi tidak diizinkan. Gunakan Tambah Manual untuk penambahan selanjutnya.');
+    return;
+  }
+  const dt = document.getElementById('shiftDate').value;
+  const st = document.getElementById('shiftType').value;
+  if(!dt || !st){ alert('Pilih tanggal & shift terlebih dahulu.'); return; }
+
+  try{
+    const rows = await parseFileToObjects(f); // from part1 SheetJS helper (already loaded)
+    let added=0;
+    for(const r of rows){
+      const name = r.name || r.nama || r.Name || '';
+      const phoneRaw = r.phone || r.hp || r.nohp || r.telepon || '';
+      const phone = normalizePhone(phoneRaw);
+      if(!name || !phone) continue;
+      const lambung = r.lambung || '';
+      const status_driver = r.status_driver || r.status || 'Batangan';
+      const note = r.note || r.keterangan || '';
+
+      // add to masterDrivers with locked=true and source=spreadsheet
+      await db.collection('masterDrivers').add({
+        name, phone, phone_e164: phone, lambung, status_driver, note,
+        source: 'spreadsheet', locked: true,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        addedBy: CURRENT.user
+      });
+
+      // push to google sheet as well (keamanan: but we imported from sheet originally, pushing is optional)
+      // We'll still push to keep sheet consistent if user wants (silent)
+      await pushToGoogleSheet({
+        name, phone, phone_e164: phone, lambung, status_driver, note, source: 'spreadsheet', shift_date: dt, shift_type: st, addedBy: CURRENT.user
+      });
+
+      added++;
+    }
+    document.getElementById('ahtStatus').innerText = `Import master selesai. Added: ${added}.`;
+    document.getElementById('masterFile').value = '';
+    loadMasterList();
+  }catch(e){
+    console.error(e); alert('Import gagal: ' + e.message);
+  }
+}
+
+/* --------------------------- ADD MANUAL -> MASTER & Sheet --------------------------- */
+async function addManualHandler(){
+  if(CURRENT.role !== 'AHT'){ alert('Hanya AHT'); return; }
+  const nm = (document.getElementById('manual_name').value||'').trim();
+  const phRaw = (document.getElementById('manual_phone').value||'').trim();
+  const ph = normalizePhone(phRaw);
+  const lb = (document.getElementById('manual_lambung').value||'').trim();
+  const sd = (document.getElementById('manual_status').value||'').trim();
+  const nt = (document.getElementById('manual_note').value||'').trim();
+
+  if(!nm || !ph){ alert('Nama & No HP wajib'); return; }
+
+  try{
+    // check duplicate by phone_e164
+    const q = await db.collection('masterDrivers').where('phone_e164','==',ph).limit(1).get();
+    if(!q.empty){
+      // update existing master entry
+      const doc = q.docs[0];
+      await db.collection('masterDrivers').doc(doc.id).update({
+        name: nm, phone: ph, phone_e164: ph, lambung: lb, status_driver: sd, note: nt, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: CURRENT.user
+      });
+      document.getElementById('ahtStatus').innerText = 'Master diupdate (sudah ada).';
+    } else {
+      // add new master entry (source manual, locked=false)
+      const ref = await db.collection('masterDrivers').add({
+        name: nm, phone: ph, phone_e164: ph, lambung: lb, status_driver: sd, note: nt,
+        source: 'manual', locked: false,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(), updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        addedBy: CURRENT.user
+      });
+      document.getElementById('ahtStatus').innerText = 'Driver manual ditambahkan ke MASTER.';
+      // push to Google Sheet
+      pushToGoogleSheet({
+        name: nm, phone: ph, phone_e164: ph, lambung: lb, status_driver: sd, note: nt, source: 'manual', shift_date: document.getElementById('shiftDate').value, shift_type: document.getElementById('shiftType').value, addedBy: CURRENT.user
+      }).then(r=> console.log('pushed manual to sheet', r)).catch(err=> console.warn('sheet push fail', err));
+    }
+    // clear form
+    document.getElementById('manual_name').value=''; document.getElementById('manual_phone').value=''; document.getElementById('manual_lambung').value=''; document.getElementById('manual_note').value='';
+    loadMasterList();
+  }catch(e){ console.error(e); alert('Gagal tambah manual: '+ e.message); }
+}
+
+/* --------------------------- LOAD MASTER LIST (with checkboxes) --------------------------- */
+let MASTER_CACHE = []; // local cache
+async function loadMasterList(){
+  // fetch all masterDrivers (limit set to 2000)
+  try{
+    const snap = await db.collection('masterDrivers').orderBy('name').get();
+    MASTER_CACHE = snap.docs.map(d=>({ id: d.id, ...d.data() }));
+    renderMasterList();
+  }catch(e){ console.error('loadMasterList', e); document.getElementById('masterList').innerText = 'Gagal ambil master'; }
+}
+
+function renderMasterList(){
+  const area = document.getElementById('masterList');
+  const q = (document.getElementById('masterSearch').value||'').toLowerCase();
+  let list = MASTER_CACHE.slice();
+  if(q) list = list.filter(d=> (d.name + ' ' + d.phone + ' ' + (d.lambung||'')).toLowerCase().includes(q));
+  if(list.length === 0){ area.innerHTML = '<div class="muted">Tidak ada master.</div>'; return; }
+
+  const html = list.map(d=>{
+    const lockedLabel = d.locked ? '<span class="muted" style="font-size:12px"> (locked)</span>' : '';
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border-bottom:1px solid #f1f6ff">
+      <div style="display:flex;gap:10px;align-items:center">
+        <input type="checkbox" data-id="${d.id}" class="masterCheck"/>
+        <div><strong>${escapeHtml(d.name)}</strong>${lockedLabel}<div class="small muted">${escapeHtml(d.phone)} • ${escapeHtml(d.lambung||'-')}</div></div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="ghost" data-edit="${d.id}">Edit</button>
+        <button class="danger" data-del="${d.id}">Hapus</button>
+      </div>
+    </div>`;
+  }).join('');
+  area.innerHTML = html;
+
+  // wire checkbox actions (no need)
+  // wire edit & delete buttons
+  area.querySelectorAll('button[data-edit]').forEach(btn=>{
+    btn.onclick = ()=> openEditMaster(btn.getAttribute('data-edit'));
+  });
+  area.querySelectorAll('button[data-del]').forEach(btn=>{
+    btn.onclick = ()=> deleteMasterDriver(btn.getAttribute('data-del'));
+  });
+}
+
+function selectAllMaster(){
+  document.querySelectorAll('#masterList .masterCheck').forEach(cb=> cb.checked = true);
+}
+function clearSelectionMaster(){
+  document.querySelectorAll('#masterList .masterCheck').forEach(cb=> cb.checked = false);
+}
+
+/* --------------------------- EDIT MASTER (AHT allowed for manual; spreadsheet locked not deletable) --------------------------- */
+function openEditMaster(id){
+  const d = MASTER_CACHE.find(x=> x.id === id);
+  if(!d) return alert('Data tidak ditemukan');
+  const nm = prompt('Nama:', d.name || '');
+  if(nm === null) return;
+  const ph = prompt('No HP (0812...):', d.phone || '');
+  if(ph === null) return;
+  const lb = prompt('Lambung:', d.lambung || '');
+  const note = prompt('Keterangan:', d.note || '');
+  // update
+  db.collection('masterDrivers').doc(id).update({
+    name: nm, phone: ph, phone_e164: normalizePhone(ph), lambung: lb, note: note || '', updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: CURRENT.user
+  }).then(()=> { loadMasterList(); alert('Diupdate'); }).catch(e=> alert('Update gagal: '+e.message));
+}
+
+async function deleteMasterDriver(id){
+  const d = MASTER_CACHE.find(x=> x.id === id);
+  if(!d) return;
+  // cannot delete spreadsheet-sourced drivers (locked)
+  if(d.locked){
+    return alert('Driver ini berasal dari spreadsheet dan tidak bisa dihapus.');
+  }
+  if(!confirm('Hapus driver ini dari MASTER?')) return;
+  try{
+    await db.collection('masterDrivers').doc(id).delete();
+    loadMasterList();
+    alert('Terhapus');
+  }catch(e){ alert('Gagal hapus: '+ e.message); }
+}
+
+/* --------------------------- ADD SELECTED TO dailyInput (READY) --------------------------- */
+async function addSelectedToDailyInput(){
+  if(CURRENT.role !== 'AHT'){ alert('Hanya AHT boleh melakukan ini'); return; }
+  const dt = document.getElementById('shiftDate').value;
+  const st = document.getElementById('shiftType').value;
+  if(!dt || !st){ alert('Pilih tanggal & shift terlebih dahulu'); return; }
+
+  const checks = Array.from(document.querySelectorAll('#masterList .masterCheck')).filter(c=>c.checked);
+  if(checks.length === 0) return alert('Pilih minimal 1 driver dari master list.');
+
+  let added = 0;
+  for(const cb of checks){
+    const id = cb.getAttribute('data-id');
+    const m = MASTER_CACHE.find(x=> x.id === id);
+    if(!m) continue;
+    // create dailyInput entry
+    await db.collection('dailyInput').add({
+      driver_id: id,
+      name: m.name,
+      phone: m.phone,
+      phone_e164: m.phone_e164 || normalizePhone(m.phone),
+      lambung: m.lambung || '',
+      status_driver: m.status_driver || '',
+      note: m.note || '',
+      shift_date: dt,
+      shift_type: st,
+      feedback: '', // ISD will fill USED/OFF/CANCEL
+      subfeedback: '',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      addedBy: CURRENT.user
+    });
+    added++;
+  }
+  document.getElementById('ahtStatus').innerText = `Ditambahkan ${added} driver ke READY (${st}, ${dt}).`;
+  // clear selection
+  clearSelectionMaster();
+}
+
+/* --------------------------- READY LIST UI (AHT can edit dailyInput entries) --------------------------- */
+async function renderReadyListUI(){
+  const dt = document.getElementById('shiftDate').value;
+  const st = document.getElementById('shiftType').value;
+  if(!dt || !st){ alert('Pilih tanggal & shift'); return; }
+  // fetch dailyInput for that shift
+  const snap = await db.collection('dailyInput').where('shift_date','==',dt).where('shift_type','==',st).orderBy('createdAt','asc').get();
+  const rows = snap.docs.map(d=> ({ id: d.id, ...d.data() }) );
+  // create UI modal-like
+  let html = `<div style="padding:8px"><h3>Ready List — ${st}, ${dt}</h3>`;
+  html += `<div style="margin-bottom:8px"><button id="btnCloseReady" class="ghost">Tutup</button> <button id="btnRefreshReady" class="ghost">Refresh</button></div>`;
+  if(rows.length === 0) html += `<div class="muted">Tidak ada data READY untuk shift ini.</div>`;
+  else {
+    html += `<ol>`;
+    rows.forEach(r=>{
+      html += `<li style="margin-bottom:8px;padding:8px;border:1px solid #eef6ff;border-radius:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><strong>${escapeHtml(r.name)}</strong> • ${escapeHtml(r.phone || '-')} • Lambung: ${escapeHtml(r.lambung||'-')}</div>
+          <div style="display:flex;gap:8px">
+            <button class="ghost" data-edit="${r.id}">Edit</button>
+            <button class="ghost" data-view="${r.id}">View</button>
+            <button class="danger" data-del="${r.id}">Hapus</button>
+          </div>
+        </div>
+        <div class="muted small">AddedBy: ${escapeHtml(r.addedBy||r.addedBy||'')} • Created: ${r.createdAt ? (r.createdAt.toDate? r.createdAt.toDate().toLocaleString() : r.createdAt) : '-'}</div>
+      </li>`;
+    });
+    html += `</ol>`;
+  }
+  html += `</div>`;
+
+  // open small window to show content
+  const w = window.open('', '_blank', 'width=700,height=700');
+  w.document.write(`<html><head><title>Ready List</title></head><body style="font-family:Arial;padding:12px">${html}</body></html>`);
+  w.document.close();
+
+  // attach handlers after small delay (since it's new window, attach via window.open content)
+  w.onload = function(){
+    const doc = w.document;
+    doc.getElementById('btnCloseReady').onclick = ()=> w.close();
+    doc.getElementById('btnRefreshReady').onclick = async ()=> {
+      w.close();
+      renderReadyListUI();
+    };
+    // wire edit/view/delete
+    doc.querySelectorAll('[data-edit]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const id = btn.getAttribute('data-edit');
+        const recSnap = await db.collection('dailyInput').doc(id).get();
+        const rec = recSnap.data();
+        // prompt editable fields
+        const newName = prompt('Nama:', rec.name || '');
+        if(newName === null) return;
+        const newPhone = prompt('Phone:', rec.phone || '');
+        if(newPhone === null) return;
+        const newLambung = prompt('Lambung:', rec.lambung || '');
+        const newNote = prompt('Catatan:', rec.note || '');
+        await db.collection('dailyInput').doc(id).update({
+          name: newName, phone: newPhone, phone_e164: normalizePhone(newPhone), lambung: newLambung, note: newNote || '', updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: CURRENT.user
+        });
+        alert('Diupdate');
+        w.close();
+        renderReadyListUI();
+      };
+    });
+    doc.querySelectorAll('[data-view]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const id = btn.getAttribute('data-view');
+        const recSnap = await db.collection('dailyInput').doc(id).get();
+        const rec = recSnap.data();
+        alert(JSON.stringify(rec,null,2));
+      };
+    });
+    doc.querySelectorAll('[data-del]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const id = btn.getAttribute('data-del');
+        if(!confirm('Hapus entry READY ini?')) return;
+        await db.collection('dailyInput').doc(id).delete();
+        alert('Terhapus');
+        w.close();
+        renderReadyListUI();
+      };
+    });
+  };
+}
+
+/* --------------------------- Helpers: parseFileToObjects (reuse) --------------------------- */
+/* parseFileToObjects defined in Part1 as parseFileToObjects / parseCSV; if not available, define fallback */
+if(typeof parseFileToObjects === 'undefined'){
+  async function parseFileToObjects(file){
+    const name = file.name.toLowerCase();
+    if(name.endsWith('.csv')){
+      const txt = await file.text();
+      // simple csv parse
+      const lines = txt.split(/\r?\n/).filter(l=>l.trim());
+      const headers = lines[0].split(',').map(h=>h.trim().toLowerCase());
+      const out = [];
+      for(let i=1;i<lines.length;i++){
+        const cols = lines[i].split(',');
+        const obj = {};
+        for(let j=0;j<headers.length;j++) obj[headers[j]] = cols[j] || '';
+        out.push(obj);
+      }
+      return out;
+    } else {
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab,{type:'array'});
+      const first = wb.Sheets[wb.SheetNames[0]];
+      return XLSX.utils.sheet_to_json(first,{defval:''});
+    }
+  }
+}
+
+/* --------------------------- Initialize AHT panel on login --------------------------- */
+(function waitForLoginAndInit(){
+  // Check every 300ms until CURRENT.role is set by login in part1
+  const t = setInterval(()=>{
+    if(window.CURRENT && window.CURRENT.role){
+      if(window.CURRENT.role === 'AHT'){
+        renderAHTPanel();
+      }
+      clearInterval(t);
+    }
+  },300);
+})();
+
+</script>
+<!-- END PART 2 -->
+
+<!-- index.html — PART 3 of 3 (ISD UI, MANAGER UI, Realtime Dashboard) --> <script> /************************************************************************ * PART 3 — ISD + Manager Panels + Realtime listener ************************************************************************/ // Wait login role then render correct UI (function initRolePanels(){ const t = setInterval(()=>{ if(window.CURRENT && CURRENT.role){ if(CURRENT.role === 'ISD'){ renderISDPanel(); } if(CURRENT.role === 'MANAGER'){ renderManagerPanel(); } clearInterval(t); } },300); })(); /* ====================================================================== * ============================ ISD PANEL =============================== * ====================================================================== */ function renderISDPanel(){ const html = ` <div class="card"> <h3>ISD — Umpan Balik Driver</h3> <div class="row"> <div class="col"> <label>Tanggal Shift</label> <input id="isd_shiftDate" type="date"> </div> <div style="width:220px"> <label>Jenis Shift</label> <select id="isd_shiftType"> <option value="Mitra Pagi">Mitra Pagi</option> <option value="Mitra Malam">Mitra Malam</option> </select> </div> </div> <button id="isdLoad" style="margin-top:10px">Muat Daftar READY</button> <div id="isdList" style="margin-top:14px"></div> </div> `; document.getElementById("panelIsd").innerHTML = html; // default date document.getElementById('isd_shiftDate').value = new Date().toISOString().slice(0,10); document.getElementById('isdLoad').onclick = loadISDList; } async function loadISDList(){ const dt = document.getElementById('isd_shiftDate').value; const st = document.getElementById('isd_shiftType').value; if(!dt||!st){ alert("Tanggal/Shift belum dipilih"); return; } const div = document.getElementById("isdList"); div.innerHTML = "<div class='muted'>Memuat data...</div>"; const snap = await db.collection('dailyInput') .where('shift_date','==',dt) .where('shift_type','==',st) .orderBy('createdAt','asc') .get(); if(snap.empty){ div.innerHTML = "<div class='muted'>Tidak ada list ready</div>"; return; } let html = "<ol>"; snap.docs.forEach(d=>{ const r = d.data(); const id = d.id; html += ` <li style="margin-bottom:10px;padding:10px;border:1px solid #e5ecff;border-radius:8px"> <div><strong>${escapeHtml(r.name)}</strong> • ${escapeHtml(r.phone||'-')} • Lambung: ${escapeHtml(r.lambung||'-')}</div> <div class="small muted">AddedBy: ${escapeHtml(r.addedBy||'')}</div> <div style="margin-top:6px"> <label class="small">Status:</label> <select data-sel="${id}" class="isdStatusSel"> <option value="">(pilih)</option> <option value="USED" ${r.feedback==="USED"?"selected":""}>USED (Sedang bekerja)</option> <option value="OFF" ${r.feedback==="OFF"?"selected":""}>OFF</option> <option value="CANCEL" ${r.feedback==="CANCEL"?"selected":""}>CANCEL (No Response)</option> </select> </div> <div style="margin-top:6px"> <label class="small">Substatus OFF (optional):</label> <select data-sub="${id}" class="isdSubSel"> <option value="">-</option> <option value="OPER" ${r.subfeedback==="OPER"?"selected":""}>OPER (Pindah Armada)</option> <option value="IJIN" ${r.subfeedback==="IJIN"?"selected":""}>IJIN</option> <option value="SAKIT" ${r.subfeedback==="SAKIT"?"selected":""}>SAKIT</option> <option value="DLL" ${r.subfeedback==="DLL"?"selected":""}>DLL</option> </select> </div> <button data-save="${id}" class="ghost" style="margin-top:8px">Simpan</button> </li> `; }); html += "</ol>"; div.innerHTML = html; // wire save div.querySelectorAll("button[data-save]").forEach(btn=>{ btn.onclick = async ()=>{ const id = btn.getAttribute("data-save"); const sel = div.querySelector(`select[data-sel='${id}']`); const sub = div.querySelector(`select[data-sub='${id}']`); const fb = sel.value; const sb = sub.value; await db.collection("dailyInput").doc(id).update({ feedback: fb, subfeedback: sb, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: CURRENT.user }); alert("Disimpan."); loadISDList(); }; }); } /* ====================================================================== * ============================ MANAGER PANEL ============================ * ====================================================================== */ function renderManagerPanel(){ const html = ` <div class="card"> <h3>Manager — Dashboard Realtime</h3> <div class="row"> <div class="col"> <label>Tanggal Shift</label> <input id="mgr_shiftDate" type="date"> </div> <div style="width:220px"> <label>Jenis Shift</label> <select id="mgr_shiftType"> <option value="Mitra Pagi">Mitra Pagi</option> <option value="Mitra Malam">Mitra Malam</option> </select> </div> </div> <button id="mgrLoad" style="margin-top:10px">Muat Dashboard</button> <div id="mgrSummary" style="margin-top:14px"></div> <div id="mgrTable" style="margin-top:16px"></div> </div> `; document.getElementById("panelManager").innerHTML = html; // default date today document.getElementById("mgr_shiftDate").value = new Date().toISOString().slice(0,10); document.getElementById("mgrLoad").onclick = loadManagerDashboard; } async function loadManagerDashboard(){ const dt = document.getElementById("mgr_shiftDate").value; const st = document.getElementById("mgr_shiftType").value; if(!dt||!st){ alert("Isi tanggal & shift"); return; } const summaryDiv = document.getElementById("mgrSummary"); const tableDiv = document.getElementById("mgrTable"); summaryDiv.innerHTML = "<div class='muted'>Memuat...</div>"; tableDiv.innerHTML = ""; const snap = await db.collection("dailyInput") .where("shift_date","==",dt) .where("shift_type","==",st) .orderBy("createdAt","asc") .get(); const rows = snap.docs.map(d=>({id:d.id, ...d.data()})); // summary let countReady = rows.length; let used = rows.filter(r=>r.feedback==="USED").length; let cancel = rows.filter(r=>r.feedback==="CANCEL").length; let off = rows.filter(r=>r.feedback==="OFF").length; let oper = rows.filter(r=>r.subfeedback==="OPER").length; let ijin = rows.filter(r=>r.subfeedback==="IJIN").length; let sakit = rows.filter(r=>r.subfeedback==="SAKIT").length; summaryDiv.innerHTML = ` <div class="card" style="background:#f3f7ff"> <strong>SUMMARY — ${st}, ${dt}</strong> <div class="small">Total READY: ${countReady}</div> <div class="small">USED: ${used}</div> <div class="small">OFF: ${off} (OPER: ${oper}, IJIN: ${ijin}, SAKIT: ${sakit})</div> <div class="small">CANCEL: ${cancel}</div> </div> `; // detail table if(rows.length === 0){ tableDiv.innerHTML = "<div class='muted'>Tidak ada data.</div>"; return; } let table = ` <div class="card"> <h4>Detail List</h4> <table border="1" width="100%" style="border-collapse:collapse;font-size:13px"> <tr style="background:#f0f4ff"> <th>Nama</th> <th>No HP</th> <th>Lambung</th> <th>Feedback</th> <th>Substatus</th> <th>Updated</th> </tr> `; rows.forEach(r=>{ const updated = r.updatedAt ? (r.updatedAt.toDate? r.updatedAt.toDate().toLocaleString() : r.updatedAt) : ""; table += ` <tr> <td>${escapeHtml(r.name)}</td> <td>${escapeHtml(r.phone)}</td> <td>${escapeHtml(r.lambung||'-')}</td> <td>${escapeHtml(r.feedback||'')}</td> <td>${escapeHtml(r.subfeedback||'')}</td> <td>${escapeHtml(updated)}</td> </tr> `; }); table += `</table></div>`; tableDiv.innerHTML = table; } /* ====================================================================== * ============================ REALTIME LISTENER ======================== * ====================================================================== */ function startRealtimeStub(){ // Replace stub with actual realtime listeners: startRealtimeListeners(); } function startRealtimeListeners(){ // Re-render panels if dailyInput changes (軽) if(CURRENT.role === 'ISD'){ // auto-refresh ISD list every time data changes db.collection('dailyInput').onSnapshot(()=>{ const dt = document.getElementById('isd_shiftDate')?.value; const st = document.getElementById('isd_shiftType')?.value; if(dt && st) loadISDList(); }); } if(CURRENT.role === 'MANAGER'){ db.collection('dailyInput').onSnapshot(()=>{ const dt = document.getElementById('mgr_shiftDate')?.value; const st = document.getElementById('mgr_shiftType')?.value; if(dt && st) loadManagerDashboard(); }); } } </script> <!-- END PART 3 -->
