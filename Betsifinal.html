@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>BETSI Online — Final</title>
+<style>
+:root{--bg:#f6f8fb;--card:#fff;--accent:#1967d2}
+body{font-family:Inter,system-ui,Arial, Helvetica, sans-serif;margin:0;background:var(--bg);color:#111}
+header{background:linear-gradient(90deg,#2f7bff,#6bb1ff);color:#fff;padding:16px}
+.wrap{max-width:1040px;margin:18px auto;padding:14px}
+.card{background:var(--card);border-radius:10px;padding:14px;margin-bottom:14px;box-shadow:0 8px 20px rgba(20,30,60,0.06)}
+input,select,textarea,button{font-size:14px}
+input,select,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #e6eef8;margin-top:8px;box-sizing:border-box}
+button{padding:9px 12px;border-radius:8px;border:0;background:var(--accent);color:#fff;cursor:pointer}
+button.ghost{background:#eef3ff;color:var(--accent);border:1px solid #dceaff}
+.row{display:flex;gap:10px}
+.row .col{flex:1}
+.small{font-size:13px;color:#666}
+.muted{color:#888;font-size:13px}
+.list-item{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:8px;border:1px solid #eef2ff;margin-bottom:8px;background:#fff}
+.danger{background:#ff4d4f;color:#fff;border:0;padding:8px;border-radius:6px}
+.waBtn{background:#25d366;padding:6px 10px;color:#fff;border-radius:6px;text-decoration:none}
+@media(max-width:860px){.row{flex-direction:column}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap" style="display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <h2 style="margin:0">BETSI Online — FINAL</h2>
+      <div class="small">AHT • ISD • MANAGER — Master from Google Sheet</div>
+    </div>
+    <div id="userPanel" style="text-align:right" class="small"></div>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- LOGIN -->
+  <section id="loginCard" class="card">
+    <strong>Login (akun lokal)</strong>
+    <div class="row" style="margin-top:8px">
+      <div class="col">
+        <label>Username</label>
+        <input id="username" placeholder="aht / isd / manager">
+      </div>
+      <div style="width:220px">
+        <label>Password</label>
+        <input id="password" type="password" placeholder="password">
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="col"><button id="btnLogin">Login</button></div>
+      <div style="width:200px"><button id="btnDemo" class="ghost">Isi demo akun</button></div>
+    </div>
+    <div id="loginMsg" class="muted" style="margin-top:8px"></div>
+  </section>
+
+  <section id="appArea" style="display:none">
+    <div class="card" style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div class="small">Signed in as</div>
+        <div id="roleLabel" style="font-weight:700">-</div>
+      </div>
+      <div style="text-align:right">
+        <div id="currentShiftDisplay" class="small muted"></div>
+        <div style="margin-top:6px"><button id="btnLogout" class="ghost">Logout</button></div>
+      </div>
+    </div>
+
+    <div id="panels">
+      <div id="panelAht" class="card" style="display:none"></div>
+      <div id="panelIsd" class="card" style="display:none"></div>
+      <div id="panelManager" class="card" style="display:none"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+// === CONFIG API ===
+const API_URL = "https://script.google.com/macros/s/AKfycbwqqnCqpH5hGJSOzfrSQXDXFsim2LFMeIXo9q9uuSEifz1-u0XMG0zbkzEZSSsyVP7P2Q/exec";
+
+// === LOCAL ACCOUNTS ===
+const ACCOUNTS = { aht:"aht123", isd:"isd123", manager:"mgr123" };
+let CURRENT = { user:null, role:null };
+
+// UI refs
+const loginCard = document.getElementById('loginCard');
+const appArea = document.getElementById('appArea');
+const roleLabel = document.getElementById('roleLabel');
+const userPanel = document.getElementById('userPanel');
+const loginMsg = document.getElementById('loginMsg');
+
+document.getElementById('btnDemo').addEventListener('click', ()=> {
+  document.getElementById('username').value='aht';
+  document.getElementById('password').value='aht123';
+  login();
+});
+document.getElementById('btnLogin').addEventListener('click', login);
+document.getElementById('btnLogout').addEventListener('click', ()=> location.reload());
+
+function login(){
+  const u = (document.getElementById('username').value||'').trim().toLowerCase();
+  const p = (document.getElementById('password').value||'').trim();
+  if(!u||!p){ loginMsg.innerText = 'Isi username & password.'; return; }
+  if(ACCOUNTS[u] && ACCOUNTS[u] === p){
+    CURRENT.user = u;
+    CURRENT.role = (u === 'manager') ? 'MANAGER' : (u === 'aht' ? 'AHT' : 'ISD');
+    loginCard.style.display = 'none';
+    appArea.style.display = 'block';
+    roleLabel.innerText = CURRENT.role;
+    userPanel.innerHTML = `<div class="small">User: <b>${CURRENT.user}</b></div>`;
+    loadPanels();
+  } else {
+    loginMsg.innerText = 'Username atau password salah.';
+  }
+}
+
+// HELPERS
+function waNumber(num){
+  if(!num) return '';
+  let n = String(num).replace(/\\D/g,'');
+  if(n.startsWith('0')) n = '62' + n.slice(1);
+  if(n.startsWith('8')) n = '62' + n;
+  return n;
+}
+function escapeHtml(s){ if(s==null) return ''; return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c])); }
+
+// MASTER cache
+let MASTER_CACHE = [];
+
+// Load panels according to role
+function loadPanels(){
+  document.getElementById('panelAht').style.display = (CURRENT.role==='AHT')?'block':'none';
+  document.getElementById('panelIsd').style.display = (CURRENT.role==='ISD')?'block':'none';
+  document.getElementById('panelManager').style.display = (CURRENT.role==='MANAGER')?'block':'none';
+  renderCommonControls();
+  if(CURRENT.role==='AHT') renderAHTPanel();
+  if(CURRENT.role==='ISD') renderISDPanel();
+  if(CURRENT.role==='MANAGER') renderManagerPanel();
+}
+
+// COMMON: header shift controls
+function renderCommonControls(){
+  const html = `
+    <div style="margin-bottom:12px" class="card">
+      <div class="row">
+        <div class="col"><label>Tanggal Shift</label><input type="date" id="shiftDate" value="${new Date().toISOString().slice(0,10)}"></div>
+        <div style="width:220px"><label>Jenis Shift</label><select id="shiftType"><option value="Pagi">Pagi</option><option value="Malam">Malam</option></select></div>
+      </div>
+    </div>
+  `;
+  document.getElementById('panels').insertAdjacentHTML('afterbegin', html);
+}
+
+// ================= AHT PANEL =================
+function renderAHTPanel(){
+  const html = `
+    <h3>AHT — Input & Master Driver</h3>
+    <div class="row">
+      <div class="col"><label>Nama</label><input id="manual_name"></div>
+      <div style="width:180px"><label>No HP</label><input id="manual_phone"></div>
+    </div>
+    <div class="row">
+      <div class="col"><label>Lambung</label><input id="manual_lambung"></div>
+      <div style="width:200px"><label>Status</label><select id="manual_status"><option>Batangan</option><option>Tembak</option><option>Koperasi</option></select></div>
+    </div>
+    <label>Keterangan</label><input id="manual_note">
+    <div class="row" style="margin-top:10px">
+      <div class="col"><button id="btnAddManual">Tambah ke Master</button></div>
+      <div style="width:220px"><button id="btnLoadMaster" class="ghost">Muat Master</button></div>
+    </div>
+
+    <h4 style="margin-top:14px">Master Driver</h4>
+    <div><input id="masterSearch" placeholder="Cari nama / hp / lambung"></div>
+    <div id="masterList" style="margin-top:10px;max-height:340px;overflow:auto;border-radius:8px;padding:6px;background:#fbfdff"></div>
+
+    <div style="margin-top:10px" class="row">
+      <div class="col"><button id="btnAddToReady">Tambah yg dipilih ke READY</button></div>
+      <div style="width:220px"><button id="btnOpenReady" class="ghost">Lihat READY</button></div>
+    </div>
+    <div id="ahtStatus" class="muted" style="margin-top:8px"></div>
+  `;
+  document.getElementById('panelAht').innerHTML = '<div class="card">'+html+'</div>';
+  document.getElementById('btnAddManual').onclick = addManualHandler;
+  document.getElementById('btnLoadMaster').onclick = loadMaster;
+  document.getElementById('masterSearch').oninput = renderMasterList;
+  document.getElementById('btnAddToReady').onclick = addSelectedToReady;
+  document.getElementById('btnOpenReady').onclick = openReadyViewer;
+
+  loadMaster();
+}
+
+// ================= MASTER FUNCTIONS =================
+async function loadMaster(){
+  const area = document.getElementById('masterList');
+  area.innerHTML = '<div class="muted">Memuat data...</div>';
+  try{
+    const res = await fetch(API_URL + '?action=list');
+    const j = await res.json();
+    const data = j.data || [];
+    MASTER_CACHE = data;
+    renderMasterList();
+  }catch(err){
+    area.innerHTML = '<div class="muted">Gagal mengambil data dari spreadsheet.</div>';
+    console.error(err);
+  }
+}
+
+function renderMasterList(){
+  const q = (document.getElementById('masterSearch').value||'').toLowerCase();
+  let list = MASTER_CACHE.slice();
+  if(q) list = list.filter(d=> (d.Nama+' '+(d.HP||'')+' '+(d.Lambung||'')).toLowerCase().includes(q));
+  const area = document.getElementById('masterList');
+  if(list.length===0) return area.innerHTML = '<div class="muted">Tidak ada data master.</div>';
+  let html = '';
+  list.forEach((d, idx)=>{
+    html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid #eef3ff">
+      <div style="display:flex;gap:10px;align-items:center">
+        <input type="checkbox" class="masterCheck" data-hp="${d.HP}">
+        <div><strong>${escapeHtml(d.Nama)}</strong><div class="small muted">${escapeHtml(d.HP)} • ${escapeHtml(d.Lambung||'-')}</div></div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="ghost" onclick="editMasterPrompt('${d.HP}')">Edit</button>
+        <button class="danger" onclick="deleteMasterPrompt('${d.HP}')">Hapus</button>
+        <a class="waBtn" target="_blank" href="https://wa.me/${'{'}waNumber(d.HP){'}'}?text=Halo%20${'{'}encodeURIComponent(d.Nama){'}'}">WA</a>
+      </div>
+    </div>`;});
+  area.innerHTML = html;
+}
+
+// ================ AHT actions: add manual ================
+async function addManualHandler(){
+  const nm = document.getElementById('manual_name').value.trim();
+  const hp = document.getElementById('manual_phone').value.trim();
+  const lb = document.getElementById('manual_lambung').value.trim();
+  const st = document.getElementById('manual_status').value;
+  const nt = document.getElementById('manual_note').value.trim();
+  if(!nm||!hp) return alert('Nama & HP wajib');
+  const payload = { action:'add', Nama:nm, HP:hp, Lambung:lb, Status:st, Keterangan:nt };
+  try{
+    await fetch(API_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+    alert('Driver ditambahkan ke Master');
+    loadMaster();
+    document.getElementById('manual_name').value=''; document.getElementById('manual_phone').value=''; document.getElementById('manual_lambung').value=''; document.getElementById('manual_note').value='';
+  }catch(err){ console.error(err); alert('Gagal menambahkan'); }
+}
+
+// ================ Edit & Delete master (prompt) ================
+function editMasterPrompt(hp){
+  const rec = MASTER_CACHE.find(r=>String(r.HP)===String(hp));
+  if(!rec) return alert('Data tidak ditemukan');
+  const Nama = prompt('Nama:', rec.Nama);
+  if(Nama===null) return;
+  const HP = prompt('HP:', rec.HP);
+  if(HP===null) return;
+  const Lambung = prompt('Lambung:', rec.Lambung||'');
+  const Status = prompt('Status:', rec.Status||'');
+  const Keterangan = prompt('Keterangan:', rec.Keterangan||'');
+  const payload = { action:'update', key: rec.HP, Nama:Nama, HP:HP, Lambung:Lambung, Status:Status, Keterangan:Keterangan };
+  fetch(API_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })
+    .then(()=>{ alert('Diupdate'); loadMaster(); })
+    .catch(e=>{ console.error(e); alert('Update gagal'); });
+}
+
+function deleteMasterPrompt(hp){
+  if(!confirm('Hapus driver dari Master?')) return;
+  const payload = { action:'delete', key: hp };
+  fetch(API_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })
+    .then(()=>{ alert('Dihapus'); loadMaster(); })
+    .catch(e=>{ console.error(e); alert('Hapus gagal'); });
+}
+
+// ================ Add selected to READY ===============
+async function addSelectedToReady(){
+  const checks = Array.from(document.querySelectorAll('.masterCheck')).filter(c=>c.checked);
+  if(checks.length===0) return alert('Pilih driver terlebih dahulu');
+  const tgl = document.getElementById('shiftDate').value;
+  const shf = document.getElementById('shiftType').value;
+  if(!tgl||!shf) return alert('Isi tanggal & shift');
+  let count = 0;
+  for(const c of checks){
+    const hp = c.dataset.hp;
+    const rec = MASTER_CACHE.find(r=>String(r.HP)===String(hp));
+    if(!rec) continue;
+    const payload = { action:'update', key: rec.HP, Nama: rec.Nama, HP: rec.HP, Lambung: rec.Lambung, Status: 'READY', Keterangan: rec.Keterangan||'', Tanggal: tgl, Shift: shf };
+    await fetch(API_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+    count++;
+  }
+  alert('Ditambahkan '+count+' driver ke READY');
+  loadMaster();
+}
+
+// ================ Ready viewer ===============
+function openReadyViewer(){
+  const tgl = document.getElementById('shiftDate').value;
+  const shf = document.getElementById('shiftType').value;
+  const w = window.open('', '_blank', 'width=800,height=700');
+  w.document.write('<h3>Ready List — '+shf+' '+tgl+'</h3><div id="list"></div>');
+  w.document.close();
+  fetch(API_URL + '?action=list')
+    .then(r=>r.json()).then(j=>{
+      const arr = (j.data||[]).filter(d=> d.Status==='READY' && d.Tanggal===tgl && d.Shift===shf);
+      let html = '';
+      arr.forEach((d,i)=>{ html += '<div style="padding:8px;border-bottom:1px solid #eee"><b>'+d.Nama+'</b> — '+d.HP+' — '+(d.Lambung||'-')+'</div>'; });
+      w.document.getElementById('list').innerHTML = html || '<div>Tidak ada</div>';
+    });
+}
+
+// ================= ISD PANEL =================
+function renderISDPanel(){
+  const html = `
+    <h3>ISD — Umpan Balik</h3>
+    <div id="isdList"></div>
+    <button id="btnLoadISD" class="ghost">Muat List READY</button>
+  `;
+  document.getElementById('panelIsd').innerHTML = '<div class="card">'+html+'</div>';
+  document.getElementById('btnLoadISD').onclick = loadISDList;
+}
+
+async function loadISDList(){
+  const tgl = document.getElementById('shiftDate').value;
+  const shf = document.getElementById('shiftType').value;
+  const area = document.getElementById('isdList');
+  area.innerHTML = '<div class="muted">Memuat...</div>';
+  try{
+    const res = await fetch(API_URL + '?action=list');
+    const j = await res.json();
+    const arr = (j.data||[]).filter(d=> d.Status==='READY' && d.Tanggal===tgl && d.Shift===shf);
+    if(arr.length===0) return area.innerHTML = '<div class="muted">Tidak ada READY</div>';
+    let html = '<ol>';
+    arr.forEach(r=>{
+      html += `<li style="margin-bottom:8px;padding:8px;border:1px solid #eef3ff;border-radius:6px">
+        <div><b>${r.Nama}</b> • ${r.HP} • ${r.Lambung}</div>
+        <div style="margin-top:6px">
+          <select id="fb_${r.HP}">
+            <option value="">(pilih)</option>
+            <option value="USED">USED</option>
+            <option value="OFF">OFF</option>
+            <option value="CANCEL">CANCEL</option>
+          </select>
+          <select id="sub_${r.HP}">
+            <option value="">-</option>
+            <option value="OPER">OPER</option>
+            <option value="IJIN">IJIN</option>
+            <option value="SAKIT">SAKIT</option>
+          </select>
+          <button onclick="saveISDFeedback('${r.HP}')" class="ghost">Simpan</button>
+        </div>
+      </li>`;
+    });
+    html += '</ol>';
+    area.innerHTML = html;
+  }catch(e){ area.innerHTML = '<div class="muted">Gagal memuat</div>'; console.error(e); }
+}
+
+async function saveISDFeedback(hp){
+  const fb = document.getElementById('fb_'+hp).value;
+  const sub = document.getElementById('sub_'+hp).value;
+  if(!fb) return alert('Pilih feedback');
+  const rec = MASTER_CACHE.find(r=> String(r.HP)===String(hp));
+  if(!rec) return alert('Record tidak ditemukan');
+  const payload = { action:'update', key: rec.HP, Nama: rec.Nama, HP: rec.HP, Lambung: rec.Lambung, Status: fb, Keterangan: sub || rec.Keterangan || '' };
+  await fetch(API_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+  alert('Feedback disimpan');
+  loadISDList();
+  loadMaster();
+}
+
+// ============ MANAGER PANEL ============
+function renderManagerPanel(){
+  const html = `
+    <h3>Manager — Dashboard</h3>
+    <div id="mgrSummary"></div>
+    <div id="mgrTable"></div>
+    <button onclick="loadManager()">Muat Dashboard</button>
+  `;
+  document.getElementById('panelManager').innerHTML = '<div class="card">'+html+'</div>';
+}
+
+async function loadManager(){
+  const tgl = document.getElementById('shiftDate').value;
+  const shf = document.getElementById('shiftType').value;
+  const res = await fetch(API_URL + '?action=list');
+  const j = await res.json();
+  const arr = (j.data||[]).filter(d=> d.Tanggal===tgl && d.Shift===shf);
+  const total = arr.length;
+  const used = arr.filter(x=> x.Status==='USED').length;
+  const off = arr.filter(x=> x.Status==='OFF').length;
+  const cancel = arr.filter(x=> x.Status==='CANCEL').length;
+  document.getElementById('mgrSummary').innerHTML = `<div class="card"><strong>Summary ${shf} ${tgl}</strong><div>Total: ${total}</div><div>USED:${used} OFF:${off} CANCEL:${cancel}</div></div>`;
+  let table = '<table border="1" width="100%" style="border-collapse:collapse"><tr><th>No</th><th>Nama</th><th>HP</th><th>Lambung</th><th>Status</th><th>Keterangan</th></tr>';
+  arr.forEach((r,i)=>{ table += '<tr><td>'+ (i+1) +'</td><td>'+escapeHtml(r.Nama)+'</td><td>'+escapeHtml(r.HP)+'</td><td>'+escapeHtml(r.Lambung||'-')+'</td><td>'+escapeHtml(r.Status||'')+'</td><td>'+escapeHtml(r.Keterangan||'')+'</td></tr>'; });
+  table += '</table>';
+  document.getElementById('mgrTable').innerHTML = table;
+}
+
+// Auto-initialize minimal UI
+(function init(){
+  // nothing until login
+})();
+</script>
+</body>
+</html>
